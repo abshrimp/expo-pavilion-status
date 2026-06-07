@@ -1,0 +1,571 @@
+/* src/App.css */
+:root {
+    /* Renamed from * to :root for CSS variables, or use body */
+    --color-white: #FFFFFF;
+    --color-black: #000000;
+    --color-red: #E60012;
+    --color-blue: #0068B7;
+    --color-gray: #D2D7DA;
+    --color-light-gray: #F8F9FA;
+    --color-dark-gray: #666;
+    --color-green: #51B287;
+    --color-orange: #F4A259;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root,
+/* Ensure React root takes full height */
+.App {
+    /* Main App container */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overscroll-behavior: none;
+    background-color: var(--color-white);
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Meiryo', sans-serif;
+    color: var(--color-black);
+}
+
+.header {
+    background: linear-gradient(135deg, var(--color-red), var(--color-blue));
+    color: var(--color-white);
+    padding: 12px 24px;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    position: relative;
+    flex-shrink: 0;
+}
+
+.header h1 {
+    font-size: 1.3rem;
+    font-weight: bold;
+    margin-bottom: 4px;
+    margin-top: 0;
+    /* Added */
+}
+
+.header p {
+    font-size: 0.8rem;
+    opacity: 0.9;
+    margin-bottom: 0;
+    /* Added */
+}
+
+.header-buttons {
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 10px;
+}
+
+.header-btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    color: white;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: bold;
+    transition: all 0.3s;
+    padding: 0;
+    /* Added */
+}
+
+.header-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.1) translateY(-50%);
+    /* Adjusted for existing transform */
+}
+
+.header-buttons .header-btn:hover {
+    /* More specific selector for hover transform */
+    transform: scale(1.1);
+    /* Keep original transform from translateY */
+}
+
+
+.header-btn svg {
+    width: 20px;
+    /* Adjusted for consistency, some SVGs were different */
+    height: 20px;
+    fill: white;
+}
+
+.header-btn .settings-svg {
+    /* Specific class for settings icon */
+    width: 24px;
+    height: 24px;
+}
+
+
+.container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 15px 20px;
+    overflow: hidden;
+}
+
+.controls {
+    background-color: var(--color-gray);
+    padding: 10px 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+    flex-shrink: 0;
+}
+
+.current-date {
+    font-size: 1rem;
+    font-weight: bold;
+    color: var(--color-black);
+}
+
+.refresh-btn {
+    background: linear-gradient(135deg, var(--color-red), var(--color-blue));
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: all 0.3s;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.refresh-btn:hover:not(:disabled) {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.refresh-btn.updating {
+    animation: spin 1s linear infinite;
+}
+
+.refresh-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: white;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.table-container {
+    background-color: var(--color-white);
+    border-radius: 7px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: none;
+    transition: opacity 0.3s ease-in-out;
+    /* Added for smooth refresh */
+}
+
+.reservation-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.reservation-table th {
+    background-color: var(--color-blue);
+    color: var(--color-white);
+    padding: 10px 4px;
+    text-align: center;
+    font-weight: bold;
+    position: sticky;
+    top: 0;
+    border-right: 2px solid var(--color-white);
+    z-index: 10;
+}
+
+.reservation-table th:first-child {
+    background-color: var(--color-red);
+    text-align: left;
+    min-width: 120px;
+    max-width: 150px;
+    border-right: 3px solid var(--color-white);
+    position: sticky;
+    left: 0;
+    z-index: 11;
+    /* Higher z-index than other th */
+}
+
+.reservation-table th:last-child {
+    border-right: none;
+}
+
+.reservation-table td {
+    padding: 4px;
+    border-bottom: 1px solid var(--color-gray);
+    border-right: 2px solid var(--color-light-gray);
+    transition: background-color 0.2s;
+    min-height: 50px;
+    height: 50px;
+    text-align: center;
+    /* Center align status icons */
+}
+
+.reservation-table td:first-child {
+    background-color: var(--color-light-gray);
+    text-align: left;
+    font-weight: bold;
+    color: var(--color-black);
+    border-right: 3px solid var(--color-gray);
+    position: sticky;
+    left: 0;
+    z-index: 9;
+    min-width: 120px;
+    max-width: 150px;
+    overflow-wrap: break-word;
+}
+
+.reservation-table td:last-child {
+    border-right: none;
+}
+
+.reservation-table tbody tr:hover {
+    background-color: var(--color-light-gray);
+}
+
+/* Ensure the sticky first child's background also changes on row hover */
+.reservation-table tbody tr:hover td:first-child {
+    background-color: #e9ecef;
+    /* A slightly different shade or same as row hover */
+}
+
+
+.status-icon {
+    transition: transform 0.1s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.status-icon svg {
+    /* Ensure SVGs within status-icon are sized */
+    width: 32px;
+    height: 32px;
+}
+
+.status-icon-hover {
+    cursor: pointer;
+}
+
+.status-icon-hover:hover {
+    transform: scale(1.3);
+}
+
+.pavilion-category {
+    font-size: 0.75rem;
+    color: var(--color-dark-gray);
+    display: block;
+    margin-top: 2px;
+}
+
+/* Modal common */
+.modal {
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    overflow: auto;
+}
+
+.modal-content {
+    background-color: var(--color-white);
+    margin: 2% auto;
+    /* Keep auto for responsiveness but flex centering handles it */
+    padding: 30px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 600px;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    /* Ensure modal content is scrollable if too tall */
+    overflow-y: auto;
+    font-size: 0.9rem;
+}
+
+.toggle-switch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    margin: 15px 0;
+    /* Added from inline style */
+}
+
+.toggle-switch input[type="checkbox"] {
+    appearance: none;
+    width: 40px;
+    height: 20px;
+    background-color: #ccc;
+    border-radius: 20px;
+    position: relative;
+    outline: none;
+    transition: background-color 0.3s;
+    cursor: pointer;
+    margin: 0;
+    /* Reset margin */
+}
+
+.toggle-switch input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background-color: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.toggle-switch input[type="checkbox"]:checked {
+    background-color: #0068B7;
+}
+
+.toggle-switch input[type="checkbox"]:checked::before {
+    transform: translateX(20px);
+}
+
+.label-text {
+    color: #000;
+}
+
+.close {
+    position: absolute;
+    right: 20px;
+    top: 15px;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    color: var(--color-dark-gray);
+    transition: color 0.3s;
+}
+
+.close:hover {
+    color: var(--color-red);
+}
+
+.modal h2 {
+    color: var(--color-red);
+    margin-top: 0;
+    /* Added */
+    margin-bottom: 15px;
+    font-size: 1.5rem;
+}
+
+.legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background-color: var(--color-light-gray);
+    border-radius: 8px;
+}
+
+.legend-icon {
+    width: 28px;
+    height: 28px;
+}
+
+.legend-icon svg {
+    /* Ensure SVGs within legend-icon are sized */
+    width: 28px;
+    height: 28px;
+}
+
+
+.usage-section {
+    margin: 25px 0;
+}
+
+.usage-section h3 {
+    color: var(--color-blue);
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+}
+
+.usage-section p {
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+.form-group {
+    margin: 15px 0;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--color-gray);
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    /* Added for better sizing */
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--color-red), var(--color-blue));
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    width: 100%;
+    margin-top: 10px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    /* Added for hover effect */
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .header {
+        text-align: left;
+        padding: 9px 24px;
+    }
+
+    .header h1 {
+        font-size: 1.1rem;
+    }
+
+    .header p {
+        font-size: 0.7rem;
+    }
+
+    .header-buttons {
+        right: 10px;
+    }
+
+    .header-btn {
+        width: 35px;
+        height: 35px;
+        font-size: 1rem;
+    }
+
+    .header-btn svg {
+        /* Adjust SVG size for smaller buttons */
+        width: 18px;
+        height: 18px;
+    }
+
+    .header-btn .settings-svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .container {
+        padding: 8px;
+    }
+
+    .controls {
+        padding: 7px 20px;
+        margin-bottom: 8px;
+    }
+
+    .current-date {
+        font-size: 0.8rem;
+    }
+
+    .refresh-btn {
+        width: 35px;
+        height: 35px;
+    }
+
+    .refresh-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .table-container {
+        border-radius: 4px;
+    }
+
+    .reservation-table {
+        font-size: 0.8rem;
+    }
+
+    .reservation-table th {
+        padding: 6px 4px;
+    }
+
+    .reservation-table th:first-child,
+    .reservation-table td:first-child {
+        min-width: 87px;
+        max-width: 87px;
+    }
+
+
+    .modal-content {
+        margin: 5% auto;
+        padding: 20px;
+    }
+}

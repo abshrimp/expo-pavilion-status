@@ -1,0 +1,32 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# production
+/build
+
+# 事前生成した過去ログ（build-history.mjs で再生成。サイズが大きいのでコミットしない）
+# /public/history
+
+# reserve.php が作る当日予約ランキングの保存先（実行時データ。コミットしない）
+/public/reservations
+
+# build-history.mjs の入力ログ（64MBと大きいのでコミットしない。output の public/history は別途管理）
+# /dev/data.csv
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
