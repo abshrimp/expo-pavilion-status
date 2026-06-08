@@ -62,9 +62,9 @@ const ReservedModal = ({ isOpen, onClose, reserved }) => {
                     <p style={{ color: 'var(--color-dark-gray)', margin: '0 0 24px' }}>予約番号を確認中…</p>
                 )}
                 {status === 'done' && info && (
-                    <p style={{ color: 'var(--color-black)', margin: '0 0 24px', lineHeight: 1.5 }}>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--color-black)', margin: '0 0 24px', lineHeight: 1.5 }}>
                         本日このパビリオンを<br />
-                        <strong style={{ fontSize: '1.8rem' }}>{info.rank}</strong> 番目に予約しました
+                        <strong style={{ fontSize: '1.2rem' }}>{info.rank}</strong> 番目に予約しました
                         {info.repeat && (
                             <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--color-dark-gray)', marginTop: 6 }}>
                                 ※本日は予約済みです

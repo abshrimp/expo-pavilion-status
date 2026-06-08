@@ -38,6 +38,54 @@ const pad2 = (n) => String(n).padStart(2, '0');
 const dateKeyOf = (y, mo, d) => `${y}-${pad2(mo)}-${pad2(d)}`;
 const hms = (h, mi, s) => `${pad2(h)}:${pad2(mi)}:${pad2(s)}`;
 
+// "HH:MM:SS" に1分加算（日付を跨ぐ場合は 23:59:59 に丸める）
+function addOneMinute(t) {
+    const [h, mi, s] = t.split(':').map(Number);
+    let total = h * 3600 + mi * 60 + s + 60;
+    if (total >= 24 * 3600) total = 24 * 3600 - 1; // 23:59:59 に丸め
+    return hms(Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60);
+}
+
+// ◯（status 0）のまま ✗/△ へ戻る変化が記録されていない枠は、✗ へ戻る変化ログが
+// 抜け落ちている可能性が高い。次の2ケースについて ✗（status 2）への合成イベントを補う。
+//   (1) イベントで◯になり、その後変化が無い枠 … 最終◯の1分後に✗
+//   (2) base が◯のまま終日イベントが無い枠   … 9:00 に✗
+// いずれも ✗ にする時刻は 9:00 以降に丸める。戻り値は追加した件数。
+const NINE_AM = '09:00:00';
+function patchMissingFull(day) {
+    // 枠（code+slot）ごとの最終イベントを求める（ev は時刻順）
+    const lastByKey = new Map();
+    for (const e of day.ev) lastByKey.set(`${e[1]}\t${e[2]}`, e);
+
+    let added = 0;
+
+    // (1) イベントで◯になったまま戻らない枠 … 最終◯の1分後（最早でも9:00）に✗
+    for (const e of lastByKey.values()) {
+        if (e[3] === 0) {
+            const t = addOneMinute(e[0]);
+            day.ev.push([t < NINE_AM ? NINE_AM : t, e[1], e[2], 2]);
+            added++;
+        }
+    }
+
+    // (2) base が◯のまま、その日その枠にイベントが1件も無い枠 … 9:00 に✗
+    for (const code in day.base) {
+        const slots = day.base[code];
+        for (const slot in slots) {
+            if (slots[slot] !== 0) continue;
+            if (lastByKey.has(`${code}\t${slot}`)) continue; // イベントがある枠は(1)で処理済み
+            day.ev.push([NINE_AM, code, slot, 2]);
+            added++;
+        }
+    }
+
+    if (added) {
+        // 合成イベントを混ぜたので時刻順へ並べ直す（同時刻は元の順序を維持）
+        day.ev.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    }
+    return added;
+}
+
 // JSON ブロブの終端（深さ0に戻る '}' の位置）。文字列内に { } は出現しない前提。
 function findJsonEnd(line) {
     let depth = 0;
@@ -178,10 +226,12 @@ async function main() {
     fs.writeFileSync(path.join(OUT_DIR, 'names.json'), JSON.stringify(nameMap));
 
     const dateKeys = [...days.keys()].sort();
-    let totalEv = 0, totalBytes = 0;
+    let totalEv = 0, totalBytes = 0, totalPatched = 0;
     for (const dk of dateKeys) {
         const day = days.get(dk);
         if (!day.base) day.base = {}; // ブロブが無い日（初日など）は空ベースライン
+        // ◯のまま✗へ戻らない枠は変化ログ欠落とみなし、1分後の✗を補う
+        totalPatched += patchMissingFull(day);
         // ev は読み込み順＝時刻順。出力。
         const body = JSON.stringify(day);
         fs.writeFileSync(path.join(OUT_DIR, `${dk}.json`), body);
@@ -199,7 +249,7 @@ async function main() {
     fs.writeFileSync(path.join(OUT_DIR, 'index.json'), JSON.stringify(index));
 
     console.log(`lines=${lineNo} badLines=${badLines}`);
-    console.log(`days=${dateKeys.length} (${index.minDate} 〜 ${index.maxDate}) totalEvents=${totalEv}`);
+    console.log(`days=${dateKeys.length} (${index.minDate} 〜 ${index.maxDate}) totalEvents=${totalEv} (うち合成✗=${totalPatched})`);
     console.log(`names=${Object.keys(nameMap).length} 件`);
     console.log(`out=${OUT_DIR}  合計 ${(totalBytes / 1024 / 1024).toFixed(1)} MB`);
 }

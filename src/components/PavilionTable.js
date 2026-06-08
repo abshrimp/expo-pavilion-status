@@ -36,14 +36,18 @@ const PavilionTable = ({ pavilions, setIsOpen, settings, errMsg }) => {
             if (pavilions[i].n == "") continue;
 
             const timeData = {};
+            const slotTimeData = {}; // 列キー -> 実際のスロット時刻文字列（"1458" 等）
             for (let j = 0; j < pavilions[i].s.length; j++) {
                 const time = str2date(pavilions[i].s[j].t);
                 for (let k = 0; k < times.length - 1; k++) {
                     if (times[k] <= time && time < times[k + 1]) {
                         timesCount[k]++;
                         const key = times[k].getTime();
-                        if (!(key in timeData)) timeData[key] = 2;
-                        if (pavilions[i].s[j].s < timeData[key]) timeData[key] = pavilions[i].s[j].s;
+                        // 列内で最も空いている（status が小さい）スロットを採用し、その実時刻も記録
+                        if (!(key in timeData) || pavilions[i].s[j].s < timeData[key]) {
+                            timeData[key] = pavilions[i].s[j].s;
+                            slotTimeData[key] = pavilions[i].s[j].t;
+                        }
                         if (Number(pavilions[i].s[j].s) <= 1) availableTimesCount[k]++;
                         break;
                     }
@@ -56,7 +60,8 @@ const PavilionTable = ({ pavilions, setIsOpen, settings, errMsg }) => {
                 category: pavilions[i].c in names ? names[pavilions[i].c][1] : '',
                 fullName: pavilions[i].n,
                 url: pavilions[i].u,
-                timeData: timeData
+                timeData: timeData,
+                slotTimeData: slotTimeData
             })
         }
 
@@ -117,9 +122,12 @@ const PavilionTable = ({ pavilions, setIsOpen, settings, errMsg }) => {
 
                                     // ◯（空きあり = status 0）のときのみ押せる
                                     const clickable = status === '0';
+                                    // 列は15分刻みだが、表示は実際のスロット時刻（"1458" → "14:58"）
+                                    const slotRaw = pavilion.slotTimeData[time.getTime()];
+                                    const slotLabel = slotRaw ? `${slotRaw.slice(0, 2)}:${slotRaw.slice(2, 4)}` : hhmm;
                                     const reserve = () => setReserved({
                                         name: pavilion.fullName || pavilion.name,
-                                        time: hhmm,
+                                        time: slotLabel,
                                         code: pavilion.code,
                                     });
 
