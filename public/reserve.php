@@ -76,7 +76,16 @@ if (PHP_SAPI !== 'cli') {
     if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $bid)) $bid = ''; // 無効なら無視（IPのみで判定）
 
     $tz = new DateTimeZone('Asia/Tokyo');
-    $today = (new DateTime('now', $tz))->format('Y-m-d');
+    $now = new DateTime('now', $tz);
+
+    // 疑似予約は 9:10 以降のみ受け付ける（フロント側の制限と一致）
+    if ($now < (clone $now)->setTime(9, 10, 0)) {
+        http_response_code(403);
+        echo json_encode(['error' => '疑似予約は9:10から可能です'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $today = $now->format('Y-m-d');
     $ip = client_ip();
     $ipKey = $ip !== '' ? substr(hash('sha256', $ip . '|expo-reserve'), 0, 16) : ''; // 生IPは保存しない
 

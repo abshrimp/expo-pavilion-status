@@ -14,6 +14,7 @@ const PavilionTable = ({ pavilions, setIsOpen, settings, errMsg }) => {
     const [timeSlots, setTimeSlots] = useState([]);
     const [tableData, setTableData] = useState([]);
     const [reserved, setReserved] = useState(null);
+    const [notice, setNotice] = useState(null);
 
     useEffect(() => {
         let minDate = serverNow();
@@ -87,6 +88,9 @@ const PavilionTable = ({ pavilions, setIsOpen, settings, errMsg }) => {
 
     }, [pavilions]);
 
+    const nowClock = serverNow();
+    const reservationOpen = nowClock.getHours() > 9 || (nowClock.getHours() === 9 && nowClock.getMinutes() >= 10);
+
     return (
         <>
         <div className="table-container">
@@ -120,16 +124,22 @@ const PavilionTable = ({ pavilions, setIsOpen, settings, errMsg }) => {
 
                                     const uniqueCellKey = `${pavilion.code}-${hhmm}`;
 
-                                    // ◯（空きあり = status 0）のときのみ押せる
+                                    // ◯（空きあり = status 0）なら押せる。9:10より前は注意メッセージを表示
                                     const clickable = status === '0';
                                     // 列は15分刻みだが、表示は実際のスロット時刻（"1458" → "14:58"）
                                     const slotRaw = pavilion.slotTimeData[time.getTime()];
                                     const slotLabel = slotRaw ? `${slotRaw.slice(0, 2)}:${slotRaw.slice(2, 4)}` : hhmm;
-                                    const reserve = () => setReserved({
-                                        name: pavilion.fullName || pavilion.name,
-                                        time: slotLabel,
-                                        code: pavilion.code,
-                                    });
+                                    const reserve = () => {
+                                        if (!reservationOpen) {
+                                            setNotice('まだ入場していません！9時10分以降に押せるようになります');
+                                            return;
+                                        }
+                                        setReserved({
+                                            name: pavilion.fullName || pavilion.name,
+                                            time: slotLabel,
+                                            code: pavilion.code,
+                                        });
+                                    };
 
                                     return (
                                         <td key={uniqueCellKey}>
@@ -174,6 +184,46 @@ const PavilionTable = ({ pavilions, setIsOpen, settings, errMsg }) => {
             )}
         </div>
         <ReservedModal isOpen={!!reserved} onClose={() => setReserved(null)} reserved={reserved} />
+        {notice && (
+            <div
+                className="modal"
+                onClick={() => setNotice(null)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+                <div
+                    className="modal-content"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        margin: 0,
+                        maxWidth: 340,
+                        textAlign: 'center',
+                        borderRadius: 0,
+                        border: '2px solid var(--color-black)',
+                        boxShadow: 'none',
+                        padding: 24,
+                    }}
+                >
+                    <p style={{ color: 'var(--color-black)', fontWeight: 'bold', lineHeight: 1.7, margin: '8px 0 20px' }}>
+                        {notice}
+                    </p>
+                    <button
+                        onClick={() => setNotice(null)}
+                        style={{
+                            width: '100%',
+                            padding: '14px',
+                            background: 'var(--color-white)',
+                            color: 'var(--color-black)',
+                            border: '2px solid var(--color-black)',
+                            borderRadius: 0,
+                            fontSize: '1rem',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        とじる
+                    </button>
+                </div>
+            </div>
+        )}
         </>
     );
 };
