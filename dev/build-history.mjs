@@ -32,7 +32,12 @@ const LOG_PATH = process.env.LOG_PATH || path.join(__dirname, 'data.csv');
 const NAME_MAP_PATH = process.env.NAME_MAP_PATH || path.join(__dirname, 'data.json');
 // 手動名称辞書は任意。既定ではリポジトリ直下（dev から3つ上）の server.js を best-effort で読む。
 const SERVER_JS = process.env.SERVER_JS || path.join(__dirname, '..', '..', '..', 'server.js');
+// フロントエンドの names 定数（車いす等の制限判定に使用）。
+const FRONTEND_SERVICE = process.env.FRONTEND_SERVICE || path.join(__dirname, '..', 'src', 'services', 'expoService.js');
 const OUT_DIR = process.env.OUT_DIR || path.join(__dirname, '..', 'public', 'history');
+
+// フロントエンド filterData と同じ「車いす等の制限があるもの」の判定語
+const RESTRICTED_RE = /車いす|車椅子|障がい|障害|バリアフリー/;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const dateKeyOf = (y, mo, d) => `${y}-${pad2(mo)}-${pad2(d)}`;
@@ -46,25 +51,59 @@ function addOneMinute(t) {
     return hms(Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60);
 }
 
-// ◯（status 0）のまま ✗/△ へ戻る変化が記録されていない枠は、✗ へ戻る変化ログが
-// 抜け落ちている可能性が高い。次の2ケースについて ✗（status 2）への合成イベントを補う。
+// ◯/△ のまま ✗ へ戻る変化が記録されていない枠は、✗ へ戻る変化ログが抜け落ちている
+// 可能性が高い。次のケースについて ✗（status 2）への合成イベントを補う。
 //   (1) イベントで◯になり、その後変化が無い枠 … 最終◯の1分後に✗
 //   (2) base が◯のまま終日イベントが無い枠   … 9:00 に✗
+//   (3) イベントで△になり、その後変化が無い枠 … 最終△の1分後に✗
+//       ただし △ になったのが 20:00 より前 かつ 非車椅子枠（isRestricted=false）に限る。
+//       さらに △ イベント時刻に◯/△が同時4枠以上ある「人気なし」枠は補正しない。
+//       （◯→✗ の (1)(2) は人気に関わらず通常どおり補正する）
 // いずれも ✗ にする時刻は 9:00 以降に丸める。戻り値は追加した件数。
+// isRestricted(code) はフロントエンド filterData と同じ「車いす等の制限」判定。
 const NINE_AM = '09:00:00';
-function patchMissingFull(day) {
-    // 枠（code+slot）ごとの最終イベントを求める（ev は時刻順）
+const EIGHT_PM = '20:00:00';
+function patchMissingFull(day, isRestricted) {
+    // 枠（code+slot）ごとの最終イベントと、code ごとのイベント列（時刻順）を作る。
+    // ※どちらも合成イベントを混ぜる前の元データから作る（人気判定を実データで行うため）
     const lastByKey = new Map();
-    for (const e of day.ev) lastByKey.set(`${e[1]}\t${e[2]}`, e);
+    const evByCode = new Map();
+    for (const e of day.ev) {
+        lastByKey.set(`${e[1]}\t${e[2]}`, e);
+        let arr = evByCode.get(e[1]);
+        if (!arr) { arr = []; evByCode.set(e[1], arr); }
+        arr.push(e);
+    }
+
+    // 時刻 T 時点での code の「◯/△（status<=1）枠数」を、base + その時刻までのイベントで復元
+    const availableCountAt = (code, T) => {
+        const state = Object.assign({}, day.base[code] || {});
+        const arr = evByCode.get(code) || [];
+        for (const e of arr) {
+            if (e[0] > T) break;
+            state[e[2]] = e[3];
+        }
+        let cnt = 0;
+        for (const k in state) if (state[k] <= 1) cnt++;
+        return cnt;
+    };
 
     let added = 0;
+    const pushFull = (time, code, slot) => {
+        day.ev.push([time < NINE_AM ? NINE_AM : time, code, slot, 2]);
+        added++;
+    };
 
-    // (1) イベントで◯になったまま戻らない枠 … 最終◯の1分後（最早でも9:00）に✗
+    // (1)(3) イベントで◯/△になったまま戻らない枠
     for (const e of lastByKey.values()) {
         if (e[3] === 0) {
-            const t = addOneMinute(e[0]);
-            day.ev.push([t < NINE_AM ? NINE_AM : t, e[1], e[2], 2]);
-            added++;
+            // (1) 最終◯の1分後（最早でも9:00）に✗
+            pushFull(addOneMinute(e[0]), e[1], e[2]);
+        } else if (e[3] === 1 && e[0] < EIGHT_PM && !isRestricted(e[1])) {
+            // (3) 20:00より前・非車椅子の△のみ。ただし△イベント時刻に◯/△が
+            //     同時4枠以上あるパビリオンは「人気なし」とみなし補正しない。
+            if (availableCountAt(e[1], e[0]) >= 4) continue;
+            pushFull(addOneMinute(e[0]), e[1], e[2]);
         }
     }
 
@@ -74,8 +113,7 @@ function patchMissingFull(day) {
         for (const slot in slots) {
             if (slots[slot] !== 0) continue;
             if (lastByKey.has(`${code}\t${slot}`)) continue; // イベントがある枠は(1)で処理済み
-            day.ev.push([NINE_AM, code, slot, 2]);
-            added++;
+            pushFull(NINE_AM, code, slot);
         }
     }
 
@@ -168,6 +206,27 @@ function loadCuratedNames() {
     }
 }
 
+// フロントエンド expoService.js の `export const names = { code: [表示名, 区分] }` を取り出す。
+// 車いす等の制限判定はフロントエンドと完全一致させたいので、この定数を正とする。
+function loadFrontendNames() {
+    try {
+        const txt = fs.readFileSync(FRONTEND_SERVICE, 'utf8');
+        const start = txt.indexOf('export const names = {');
+        if (start < 0) return {};
+        const open = txt.indexOf('{', start);
+        let depth = 0, end = -1;
+        for (let i = open; i < txt.length; i++) {
+            const c = txt[i];
+            if (c === '{') depth++;
+            else if (c === '}') { depth--; if (depth === 0) { end = i; break; } }
+        }
+        // eslint-disable-next-line no-eval
+        return eval('(' + txt.slice(open, end + 1) + ')');
+    } catch {
+        return {};
+    }
+}
+
 async function main() {
     let lineNo = 0, badLines = 0, lastDateKey = null;
 
@@ -225,13 +284,19 @@ async function main() {
     for (const code in curated) if (!nameMap[code]) nameMap[code] = curated[code];
     fs.writeFileSync(path.join(OUT_DIR, 'names.json'), JSON.stringify(nameMap));
 
+    // 車いす等の制限判定（フロントエンド filterData と同一ロジック）。
+    // 名前はフロントエンド names 定数の表示名を優先し、無ければ nameMap を使う。
+    const frontendNames = loadFrontendNames();
+    const isRestricted = (code) =>
+        RESTRICTED_RE.test((code in frontendNames ? frontendNames[code][0] : nameMap[code]) || '');
+
     const dateKeys = [...days.keys()].sort();
     let totalEv = 0, totalBytes = 0, totalPatched = 0;
     for (const dk of dateKeys) {
         const day = days.get(dk);
         if (!day.base) day.base = {}; // ブロブが無い日（初日など）は空ベースライン
-        // ◯のまま✗へ戻らない枠は変化ログ欠落とみなし、1分後の✗を補う
-        totalPatched += patchMissingFull(day);
+        // ◯/△のまま✗へ戻らない枠は変化ログ欠落とみなし、✗を補う（NO_PATCH=1 で無効化＝検証用）
+        if (process.env.NO_PATCH !== '1') totalPatched += patchMissingFull(day, isRestricted);
         // ev は読み込み順＝時刻順。出力。
         const body = JSON.stringify(day);
         fs.writeFileSync(path.join(OUT_DIR, `${dk}.json`), body);
