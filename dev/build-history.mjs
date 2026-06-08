@@ -51,6 +51,10 @@ const secToHms = (sec) => {
 };
 // "HH:MM:SS" に1分加算
 const addOneMinute = (t) => secToHms(toSec(t) + 60);
+// スロットコード "HHMM" のエントリー時刻（"HH:MM:00" と秒）
+const slotEntryHms = (slot) => `${slot.slice(0, 2)}:${slot.slice(2, 4)}:00`;
+const slotEntrySec = (slot) => toSec(slotEntryHms(slot));
+const isHHMM = (slot) => /^\d{4}$/.test(slot);
 
 // ✗ へ戻る変化ログが抜け落ちている枠に ✗（status 2）の合成イベントを補う。
 //   (1) イベントで◯になり、その後変化が無い枠 … 最終◯の1分後に✗
@@ -63,6 +67,8 @@ const addOneMinute = (t) => secToHms(toSec(t) + 60);
 //       先の記録の1分後に✗（次の記録より前に収まる場合のみ）。
 //   (5) ◯が10分以上継続し、その10分後にパビリオンが◯<4 かつ ◯/△<=6 のとき、
 //       その◯は1分後に✗（人気館で居座る◯は欠落とみなす）。
+//   (6) エントリー時刻が過ぎた枠（過去枠）が◯/△のまま … エントリー時刻に✗（予約不可）。
+//       (3)(5) の人気判定カウントも過去枠を✗扱いにして水増しを防ぐ。
 // いずれも ✗ にする時刻は 9:00 以降に丸める。戻り値は追加した件数。
 // isRestricted(code) はフロントエンド filterData と同じ「車いす等の制限」判定。
 const NINE_AM = '09:00:00';
@@ -83,11 +89,17 @@ function patchMissingFull(day, isRestricted) {
 
     // 時刻 T 時点の code の状態カウント（base + T以前のイベントで復元）
     //   open0  … ◯（status 0）枠数, openLE1 … ◯/△（status<=1）枠数
+    //   エントリー時刻が T 以前の「過去枠」は予約不可なので✗扱い（カウントしない）
     const countsAt = (code, T) => {
+        const Tsec = toSec(T);
         const state = Object.assign({}, day.base[code] || {});
         for (const e of (evByCode.get(code) || [])) { if (e[0] > T) break; state[e[2]] = e[3]; }
         let open0 = 0, openLE1 = 0;
-        for (const k in state) { const s = state[k]; if (s <= 1) { openLE1++; if (s === 0) open0++; } }
+        for (const k in state) {
+            if (isHHMM(k) && slotEntrySec(k) <= Tsec) continue; // 過去枠は✗扱い
+            const s = state[k];
+            if (s <= 1) { openLE1++; if (s === 0) open0++; }
+        }
         return { open0, openLE1 };
     };
 
@@ -135,6 +147,20 @@ function patchMissingFull(day, isRestricted) {
             if (byKey.has(`${code}\t${slot}`)) continue; // イベントがある枠は上で処理済み
             addFull(NINE_AM, code, slot);
         }
+    }
+
+    // (6) エントリー時刻が過ぎた枠は予約不可なので、その時刻に✗（base/イベント由来の全枠）
+    const allKeys = new Set(byKey.keys());
+    for (const code in day.base) for (const slot in day.base[code]) allKeys.add(`${code}\t${slot}`);
+    for (const key of allKeys) {
+        const [code, slot] = key.split('\t');
+        if (!isHHMM(slot)) continue;
+        const entry = slotEntryHms(slot);
+        // エントリー時刻時点の状態を復元（base + entry以前のイベント）
+        const b = day.base[code];
+        let s = (b && b[slot] !== undefined) ? b[slot] : undefined;
+        for (const e of (byKey.get(key) || [])) { if (e[0] > entry) break; s = e[3]; }
+        if (s !== undefined && s <= 1) addFull(entry, code, slot); // ◯/△ のままなら✗
     }
 
     if (adds.size === 0) return 0;
