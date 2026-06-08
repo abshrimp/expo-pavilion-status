@@ -6,6 +6,57 @@ const TIME_URL = process.env.REACT_APP_TIME_URL ?? 'https://3fe5a5f690efc790d476
 let _serverOffsetMs = 0;
 let _syncing = false;
 
+// --- デバッグクロック ---------------------------------------------------
+// 任意時刻の指定・早送りを行うためにserverNow()を上書きする仕組み。
+// localStorageに保存し、デバッグページ(#/debug)とアプリ本体の別タブ間でも共有する。
+//   { enabled, anchorMs, setAtMs, speed }
+//   現在のserverNow = anchorMs + (Date.now() - setAtMs) * speed
+//   speed===0 は一時停止を表す。
+const DEBUG_CLOCK_KEY = 'debugClock';
+let _debugClock = null;
+
+(function initDebugClock() {
+    try {
+        const raw = localStorage.getItem(DEBUG_CLOCK_KEY);
+        if (raw) {
+            const obj = JSON.parse(raw);
+            if (obj && obj.enabled) _debugClock = obj;
+        }
+    } catch { /* ignore */ }
+})();
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+        if (e.key !== DEBUG_CLOCK_KEY) return;
+        try {
+            const obj = e.newValue ? JSON.parse(e.newValue) : null;
+            _debugClock = (obj && obj.enabled) ? obj : null;
+        } catch { _debugClock = null; }
+    });
+}
+
+export function getDebugClock() {
+    return _debugClock;
+}
+
+// anchorMsはserverNow（実時刻+サーバ補正）空間のミリ秒。speedは早送り倍率(0=停止)。
+export function setDebugClock(anchorMs, speed) {
+    _debugClock = { enabled: true, anchorMs, setAtMs: Date.now(), speed };
+    try { localStorage.setItem(DEBUG_CLOCK_KEY, JSON.stringify(_debugClock)); } catch { /* ignore */ }
+}
+
+export function clearDebugClock() {
+    _debugClock = null;
+    try { localStorage.removeItem(DEBUG_CLOCK_KEY); } catch { /* ignore */ }
+}
+
+// 再生時刻(履歴データの時刻)→ serverNow空間のミリ秒へ変換
+export function replayDateToServerMs(replayDate) {
+    const d = new Date(replayDate.getTime());
+    d.setFullYear(d.getFullYear() + YEARS_BACK);
+    return d.getTime();
+}
+
 export async function syncServerTime() {
     if (_syncing) return;
     _syncing = true;
@@ -30,6 +81,9 @@ export async function syncServerTime() {
 }
 
 export function serverNow() {
+    if (_debugClock) {
+        return new Date(_debugClock.anchorMs + (Date.now() - _debugClock.setAtMs) * _debugClock.speed);
+    }
     return new Date(Date.now() + _serverOffsetMs);
 }
 

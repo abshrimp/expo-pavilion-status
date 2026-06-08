@@ -61,7 +61,7 @@ const addOneMinute = (t) => secToHms(toSec(t) + 60);
 //       補正しない（10:00より前＝オープンラッシュ中の△は人気判定せず常に✗）。
 //   (4) 同一枠で ◯→◯ または △→△ の記録が連続 … 間に✗が確実に抜けているので、
 //       先の記録の1分後に✗（次の記録より前に収まる場合のみ）。
-//   (5) ◯が10分以上継続し、その10分後にパビリオンが◯<2 かつ ◯/△<=4 のとき、
+//   (5) ◯が10分以上継続し、その10分後にパビリオンが◯<4 かつ ◯/△<=6 のとき、
 //       その◯は1分後に✗（人気館で居座る◯は欠落とみなす）。
 // いずれも ✗ にする時刻は 9:00 以降に丸める。戻り値は追加した件数。
 // isRestricted(code) はフロントエンド filterData と同じ「車いす等の制限」判定。
@@ -109,10 +109,10 @@ function patchMissingFull(day, isRestricted) {
                 if (t < next[0]) addFull(t, code, slot); // 次の記録を追い越さない場合のみ
             }
 
-            // (5) ◯が10分以上継続し、10分後に◯<2 かつ ◯/△<=4 の人気館 … 1分後に✗
+            // (5) ◯が10分以上継続し、10分後に◯<4 かつ ◯/△<=6 の人気館 … 1分後に✗
             if (next && cur[3] === 0 && toSec(next[0]) - toSec(cur[0]) >= 600) {
                 const c = countsAt(code, secToHms(toSec(cur[0]) + 600));
-                if (c.open0 < 2 && c.openLE1 <= 4) addFull(addOneMinute(cur[0]), code, slot);
+                if (c.open0 < 4 && c.openLE1 <= 6) addFull(addOneMinute(cur[0]), code, slot);
             }
 
             // 終端イベント: (1) ◯ / (3) △
