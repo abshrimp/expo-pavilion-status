@@ -43,23 +43,26 @@ const pad2 = (n) => String(n).padStart(2, '0');
 const dateKeyOf = (y, mo, d) => `${y}-${pad2(mo)}-${pad2(d)}`;
 const hms = (h, mi, s) => `${pad2(h)}:${pad2(mi)}:${pad2(s)}`;
 
-// "HH:MM:SS" に1分加算（日付を跨ぐ場合は 23:59:59 に丸める）
-function addOneMinute(t) {
-    const [h, mi, s] = t.split(':').map(Number);
-    let total = h * 3600 + mi * 60 + s + 60;
-    if (total >= 24 * 3600) total = 24 * 3600 - 1; // 23:59:59 に丸め
-    return hms(Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60);
-}
+// "HH:MM:SS" ⇄ 秒。日付跨ぎは 23:59:59 に丸める。
+const toSec = (t) => { const [h, mi, s] = t.split(':').map(Number); return h * 3600 + mi * 60 + s; };
+const secToHms = (sec) => {
+    if (sec > 24 * 3600 - 1) sec = 24 * 3600 - 1; // 23:59:59 に丸め
+    return hms(Math.floor(sec / 3600), Math.floor((sec % 3600) / 60), sec % 60);
+};
+// "HH:MM:SS" に1分加算
+const addOneMinute = (t) => secToHms(toSec(t) + 60);
 
-// ◯/△ のまま ✗ へ戻る変化が記録されていない枠は、✗ へ戻る変化ログが抜け落ちている
-// 可能性が高い。次のケースについて ✗（status 2）への合成イベントを補う。
+// ✗ へ戻る変化ログが抜け落ちている枠に ✗（status 2）の合成イベントを補う。
 //   (1) イベントで◯になり、その後変化が無い枠 … 最終◯の1分後に✗
 //   (2) base が◯のまま終日イベントが無い枠   … 9:00 に✗
 //   (3) イベントで△になり、その後変化が無い枠 … 最終△の1分後に✗
 //       ただし △ になったのが 20:00 より前 かつ 非車椅子枠（isRestricted=false）に限る。
 //       さらに 10:00 以降の△は、その時刻に◯/△が同時4枠以上ある「人気なし」枠を
 //       補正しない（10:00より前＝オープンラッシュ中の△は人気判定せず常に✗）。
-//       （◯→✗ の (1)(2) は人気に関わらず通常どおり補正する）
+//   (4) 同一枠で ◯→◯ または △→△ の記録が連続 … 間に✗が確実に抜けているので、
+//       先の記録の1分後に✗（次の記録より前に収まる場合のみ）。
+//   (5) ◯が10分以上継続し、その10分後にパビリオンが◯<2 かつ ◯/△<=4 のとき、
+//       その◯は1分後に✗（人気館で居座る◯は欠落とみなす）。
 // いずれも ✗ にする時刻は 9:00 以降に丸める。戻り値は追加した件数。
 // isRestricted(code) はフロントエンド filterData と同じ「車いす等の制限」判定。
 const NINE_AM = '09:00:00';
@@ -68,47 +71,59 @@ const EIGHT_PM = '20:00:00';
 // この時刻より前の△には人気判定を適用せず常に✗を補う。
 const OPEN_RUSH_END = '10:00:00';
 function patchMissingFull(day, isRestricted) {
-    // 枠（code+slot）ごとの最終イベントと、code ごとのイベント列（時刻順）を作る。
-    // ※どちらも合成イベントを混ぜる前の元データから作る（人気判定を実データで行うため）
-    const lastByKey = new Map();
-    const evByCode = new Map();
+    // 枠（code+slot）ごと・code ごとのイベント列（時刻順）を作る。
+    // ※どちらも合成イベントを混ぜる前の元データから作る（判定を実データで行うため）
+    const byKey = new Map();    // "code\tslot" -> [event,...]
+    const evByCode = new Map(); // code -> [event,...]
     for (const e of day.ev) {
-        lastByKey.set(`${e[1]}\t${e[2]}`, e);
-        let arr = evByCode.get(e[1]);
-        if (!arr) { arr = []; evByCode.set(e[1], arr); }
-        arr.push(e);
+        const k = `${e[1]}\t${e[2]}`;
+        let a = byKey.get(k); if (!a) { a = []; byKey.set(k, a); } a.push(e);
+        let b = evByCode.get(e[1]); if (!b) { b = []; evByCode.set(e[1], b); } b.push(e);
     }
 
-    // 時刻 T 時点での code の「◯/△（status<=1）枠数」を、base + その時刻までのイベントで復元
-    const availableCountAt = (code, T) => {
+    // 時刻 T 時点の code の状態カウント（base + T以前のイベントで復元）
+    //   open0  … ◯（status 0）枠数, openLE1 … ◯/△（status<=1）枠数
+    const countsAt = (code, T) => {
         const state = Object.assign({}, day.base[code] || {});
-        const arr = evByCode.get(code) || [];
-        for (const e of arr) {
-            if (e[0] > T) break;
-            state[e[2]] = e[3];
-        }
-        let cnt = 0;
-        for (const k in state) if (state[k] <= 1) cnt++;
-        return cnt;
+        for (const e of (evByCode.get(code) || [])) { if (e[0] > T) break; state[e[2]] = e[3]; }
+        let open0 = 0, openLE1 = 0;
+        for (const k in state) { const s = state[k]; if (s <= 1) { openLE1++; if (s === 0) open0++; } }
+        return { open0, openLE1 };
     };
 
-    let added = 0;
-    const pushFull = (time, code, slot) => {
-        day.ev.push([time < NINE_AM ? NINE_AM : time, code, slot, 2]);
-        added++;
+    // 追加する✗を (時刻,code,slot) で重複排除しつつ収集（複数ルールが同じ✗を出すため）
+    const adds = new Map();
+    const addFull = (time, code, slot) => {
+        const t = time < NINE_AM ? NINE_AM : time;
+        adds.set(`${t}\t${code}\t${slot}`, [t, code, slot, 2]);
     };
 
-    // (1)(3) イベントで◯/△になったまま戻らない枠
-    for (const e of lastByKey.values()) {
-        if (e[3] === 0) {
-            // (1) 最終◯の1分後（最早でも9:00）に✗
-            pushFull(addOneMinute(e[0]), e[1], e[2]);
-        } else if (e[3] === 1 && e[0] < EIGHT_PM && !isRestricted(e[1])) {
-            // (3) 20:00より前・非車椅子の△のみ。10:00以降の△は、その時刻に◯/△が
-            //     同時4枠以上あるパビリオンを「人気なし」とみなし補正しない。
-            //     （10:00より前＝オープンラッシュ中の△は人気判定せず常に✗）
-            if (e[0] >= OPEN_RUSH_END && availableCountAt(e[1], e[0]) >= 4) continue;
-            pushFull(addOneMinute(e[0]), e[1], e[2]);
+    for (const [k, a] of byKey) {
+        const [code, slot] = k.split('\t');
+        for (let i = 0; i < a.length; i++) {
+            const cur = a[i], next = a[i + 1]; // next が無ければ終端
+
+            // (4) ◯→◯ / △→△ の連続 … 間に✗が抜けている。先の記録の1分後に✗
+            if (next && (cur[3] === 0 || cur[3] === 1) && next[3] === cur[3]) {
+                const t = addOneMinute(cur[0]);
+                if (t < next[0]) addFull(t, code, slot); // 次の記録を追い越さない場合のみ
+            }
+
+            // (5) ◯が10分以上継続し、10分後に◯<2 かつ ◯/△<=4 の人気館 … 1分後に✗
+            if (next && cur[3] === 0 && toSec(next[0]) - toSec(cur[0]) >= 600) {
+                const c = countsAt(code, secToHms(toSec(cur[0]) + 600));
+                if (c.open0 < 2 && c.openLE1 <= 4) addFull(addOneMinute(cur[0]), code, slot);
+            }
+
+            // 終端イベント: (1) ◯ / (3) △
+            if (!next) {
+                if (cur[3] === 0) {
+                    addFull(addOneMinute(cur[0]), code, slot);
+                } else if (cur[3] === 1 && cur[0] < EIGHT_PM && !isRestricted(code)) {
+                    if (cur[0] >= OPEN_RUSH_END && countsAt(code, cur[0]).openLE1 >= 4) continue;
+                    addFull(addOneMinute(cur[0]), code, slot);
+                }
+            }
         }
     }
 
@@ -117,16 +132,16 @@ function patchMissingFull(day, isRestricted) {
         const slots = day.base[code];
         for (const slot in slots) {
             if (slots[slot] !== 0) continue;
-            if (lastByKey.has(`${code}\t${slot}`)) continue; // イベントがある枠は(1)で処理済み
-            pushFull(NINE_AM, code, slot);
+            if (byKey.has(`${code}\t${slot}`)) continue; // イベントがある枠は上で処理済み
+            addFull(NINE_AM, code, slot);
         }
     }
 
-    if (added) {
-        // 合成イベントを混ぜたので時刻順へ並べ直す（同時刻は元の順序を維持）
-        day.ev.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-    }
-    return added;
+    if (adds.size === 0) return 0;
+    for (const ev of adds.values()) day.ev.push(ev);
+    // 合成イベントを混ぜたので時刻順へ並べ直す（同時刻は元の順序を維持）
+    day.ev.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return adds.size;
 }
 
 // JSON ブロブの終端（深さ0に戻る '}' の位置）。文字列内に { } は出現しない前提。

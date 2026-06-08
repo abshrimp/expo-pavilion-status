@@ -26,7 +26,7 @@ const HelpModal = ({ isOpen, onClose }) => {
                     <div className="legend">
                         <div className="legend-item">
                             <span className="legend-icon"><StatusAvailableIcon /></span>
-                            <div><strong>空きあり</strong></div>
+                            <div><strong>空きあり (疑似予約できます)</strong></div>
                         </div>
                         <div className="legend-item">
                             <span className="legend-icon"><StatusFewLeftIcon /></span>
