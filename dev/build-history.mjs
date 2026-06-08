@@ -65,8 +65,11 @@ const isHHMM = (slot) => /^\d{4}$/.test(slot);
 //       補正しない（10:00より前＝オープンラッシュ中の△は人気判定せず常に✗）。
 //   (4) 同一枠で ◯→◯ または △→△ の記録が連続 … 間に✗が確実に抜けているので、
 //       先の記録の1分後に✗（次の記録より前に収まる場合のみ）。
-//   (5) ◯が10分以上継続し、その10分後にパビリオンが◯<4 かつ ◯/△<=6 のとき、
-//       その◯は1分後に✗（人気館で居座る◯は欠落とみなす）。
+//   (5) ◯が10分以上継続し、その日が高需要館（✗遷移数>=DEMAND_X2_MIN）のとき、
+//       その◯は1分後に✗（人気館で居座る◯は欠落とみなす）。一斉開放の枠数に依存しない。
+//       高需要館で base◯ が 10:00 を過ぎても最初のイベントが来ない枠は 9:00 で✗
+//       （9:00〜10:00 に解決する正当な開場直後の空きは保持）。
+//       高需要判定は「その館の全日平均✗遷移数 >= DEMAND_X2_MIN」（日次の揺らぎを吸収）。
 //   (6) エントリー時刻が過ぎた枠（過去枠）が◯/△のまま … エントリー時刻に✗（予約不可）。
 //       (3)(5) の人気判定カウントも過去枠を✗扱いにして水増しを防ぐ。
 // いずれも ✗ にする時刻は 9:00 以降に丸める。戻り値は追加した件数。
@@ -76,7 +79,11 @@ const EIGHT_PM = '20:00:00';
 // オープンラッシュ（予約開始直後）の終端△は、どの館も多数◯になり人気判定が誤るため、
 // この時刻より前の△には人気判定を適用せず常に✗を補う。
 const OPEN_RUSH_END = '10:00:00';
-function patchMissingFull(day, isRestricted) {
+// 高需要館の判定: その日の✗（status 2）遷移数がこれ以上なら「人気館」とみなす。
+// 一斉開放の枠数に振り回される瞬間カウントより安定した指標。日次は揺らぐので、
+// その館の「全日平均✗遷移数」がこの値以上なら高需要館とみなす（isHighDemand を main で算出）。
+const DEMAND_X2_MIN = 50;
+function patchMissingFull(day, isRestricted, isHighDemand) {
     // 枠（code+slot）ごと・code ごとのイベント列（時刻順）を作る。
     // ※どちらも合成イベントを混ぜる前の元データから作る（判定を実データで行うため）
     const byKey = new Map();    // "code\tslot" -> [event,...]
@@ -87,20 +94,18 @@ function patchMissingFull(day, isRestricted) {
         let b = evByCode.get(e[1]); if (!b) { b = []; evByCode.set(e[1], b); } b.push(e);
     }
 
-    // 時刻 T 時点の code の状態カウント（base + T以前のイベントで復元）
-    //   open0  … ◯（status 0）枠数, openLE1 … ◯/△（status<=1）枠数
-    //   エントリー時刻が T 以前の「過去枠」は予約不可なので✗扱い（カウントしない）
-    const countsAt = (code, T) => {
+    // 時刻 T 時点の code の「◯/△（status<=1）枠数」（base + T以前のイベントで復元）。
+    // エントリー時刻が T 以前の「過去枠」は予約不可なので✗扱い（カウントしない）。
+    const availableCountAt = (code, T) => {
         const Tsec = toSec(T);
         const state = Object.assign({}, day.base[code] || {});
         for (const e of (evByCode.get(code) || [])) { if (e[0] > T) break; state[e[2]] = e[3]; }
-        let open0 = 0, openLE1 = 0;
+        let openLE1 = 0;
         for (const k in state) {
             if (isHHMM(k) && slotEntrySec(k) <= Tsec) continue; // 過去枠は✗扱い
-            const s = state[k];
-            if (s <= 1) { openLE1++; if (s === 0) open0++; }
+            if (state[k] <= 1) openLE1++;
         }
-        return { open0, openLE1 };
+        return openLE1;
     };
 
     // 追加する✗を (時刻,code,slot) で重複排除しつつ収集（複数ルールが同じ✗を出すため）
@@ -112,6 +117,15 @@ function patchMissingFull(day, isRestricted) {
 
     for (const [k, a] of byKey) {
         const [code, slot] = k.split('\t');
+
+        // (5b) base◯ が高需要館でオープンラッシュ（10:00）を過ぎても最初のイベントが
+        //      来ない枠は、開場時点で既に埋まっていた（記録欠落）とみなし 9:00 に✗。
+        //      9:00〜10:00 に解決する正当な開場直後の空きは（最初のイベントが10:00前なので）保持。
+        const baseS = day.base[code] ? day.base[code][slot] : undefined;
+        if (baseS === 0 && a.length && a[0][0] >= OPEN_RUSH_END && isHighDemand(code)) {
+            addFull(NINE_AM, code, slot);
+        }
+
         for (let i = 0; i < a.length; i++) {
             const cur = a[i], next = a[i + 1]; // next が無ければ終端
 
@@ -121,10 +135,9 @@ function patchMissingFull(day, isRestricted) {
                 if (t < next[0]) addFull(t, code, slot); // 次の記録を追い越さない場合のみ
             }
 
-            // (5) ◯が10分以上継続し、10分後に◯<4 かつ ◯/△<=6 の人気館 … 1分後に✗
-            if (next && cur[3] === 0 && toSec(next[0]) - toSec(cur[0]) >= 600) {
-                const c = countsAt(code, secToHms(toSec(cur[0]) + 600));
-                if (c.open0 < 4 && c.openLE1 <= 6) addFull(addOneMinute(cur[0]), code, slot);
+            // (5) ◯が10分以上継続し、その日の高需要館（✗遷移≧DEMAND_X2_MIN）… 1分後に✗
+            if (next && cur[3] === 0 && toSec(next[0]) - toSec(cur[0]) >= 600 && isHighDemand(code)) {
+                addFull(addOneMinute(cur[0]), code, slot);
             }
 
             // 終端イベント: (1) ◯ / (3) △
@@ -132,7 +145,7 @@ function patchMissingFull(day, isRestricted) {
                 if (cur[3] === 0) {
                     addFull(addOneMinute(cur[0]), code, slot);
                 } else if (cur[3] === 1 && cur[0] < EIGHT_PM && !isRestricted(code)) {
-                    if (cur[0] >= OPEN_RUSH_END && countsAt(code, cur[0]).openLE1 >= 4) continue;
+                    if (cur[0] >= OPEN_RUSH_END && availableCountAt(code, cur[0]) >= 4) continue;
                     addFull(addOneMinute(cur[0]), code, slot);
                 }
             }
@@ -336,13 +349,28 @@ async function main() {
     const isRestricted = (code) =>
         RESTRICTED_RE.test((code in frontendNames ? frontendNames[code][0] : nameMap[code]) || '');
 
+    // 高需要館の判定: 館ごとの「全日平均✗遷移数」で判定（日次は揺らぐため全日通しで算出）。
+    const demandByCode = new Map(); // code -> { sum, days }
+    for (const day of days.values()) {
+        const perCode = new Map();
+        for (const e of day.ev) if (e[3] === 2) perCode.set(e[1], (perCode.get(e[1]) || 0) + 1);
+        for (const [code, n] of perCode) {
+            const d = demandByCode.get(code) || { sum: 0, days: 0 };
+            d.sum += n; d.days += 1; demandByCode.set(code, d);
+        }
+    }
+    const isHighDemand = (code) => {
+        const d = demandByCode.get(code);
+        return d ? d.sum / d.days >= DEMAND_X2_MIN : false;
+    };
+
     const dateKeys = [...days.keys()].sort();
     let totalEv = 0, totalBytes = 0, totalPatched = 0;
     for (const dk of dateKeys) {
         const day = days.get(dk);
         if (!day.base) day.base = {}; // ブロブが無い日（初日など）は空ベースライン
         // ◯/△のまま✗へ戻らない枠は変化ログ欠落とみなし、✗を補う（NO_PATCH=1 で無効化＝検証用）
-        if (process.env.NO_PATCH !== '1') totalPatched += patchMissingFull(day, isRestricted);
+        if (process.env.NO_PATCH !== '1') totalPatched += patchMissingFull(day, isRestricted, isHighDemand);
         // ev は読み込み順＝時刻順。出力。
         const body = JSON.stringify(day);
         fs.writeFileSync(path.join(OUT_DIR, `${dk}.json`), body);
